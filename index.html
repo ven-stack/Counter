@@ -191,10 +191,33 @@
       padding-top: 10px;
       display: flex;
       justify-content: space-between;
+      align-items: center;
       font-size: 9px;
       color: #2a2a2a;
       letter-spacing: 0.25em;
       text-transform: uppercase;
+    }
+
+    .btn-notify {
+      background: none;
+      border: 1px solid #2a2a2a;
+      color: #333;
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      padding: 4px 8px;
+      height: auto;
+      width: auto;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: all 0.15s;
+    }
+    .btn-notify:hover, .btn-notify.active {
+      border-color: #00ff88;
+      color: #00ff88;
+    }
+    .btn-notify.denied {
+      border-color: #ff3355;
+      color: #ff3355;
     }
 
     .footer {
@@ -237,6 +260,7 @@
 
   <div class="bottom-strip">
     <span>HOLD TO RAPID</span>
+    <button class="btn-notify" id="btnNotify">NOTIFY</button>
     <span id="serial">SN-04891</span>
   </div>
 </div>
@@ -244,24 +268,59 @@
 <div class="footer">◼ INDUSTRIAL SERIES ◼</div>
 
 <script>
+  // ── IndexedDB ────────────────────────────────────────────────
+  const DB_NAME = 'counterDB', DB_STORE = 'state', DB_KEY = 'count';
+
+  function openDB() {
+    return new Promise((res, rej) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = e => e.target.result.createObjectStore(DB_STORE);
+      req.onsuccess = e => res(e.target.result);
+      req.onerror   = e => rej(e.target.error);
+    });
+  }
+
+  async function dbGet() {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(DB_STORE, 'readonly');
+      const req = tx.objectStore(DB_STORE).get(DB_KEY);
+      req.onsuccess = () => res(req.result ?? 0);
+      req.onerror   = e => rej(e.target.error);
+    });
+  }
+
+  async function dbSet(val) {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(val, DB_KEY);
+      tx.oncomplete = () => res(val);
+      tx.onerror    = e => rej(e.target.error);
+    });
+  }
+
+  // ── UI refs ──────────────────────────────────────────────────
+  const display    = document.getElementById('display');
+  const signEl     = document.getElementById('sign');
+  const digits     = ['d0','d1','d2','d3'].map(id => document.getElementById(id));
+  const serialEl   = document.getElementById('serial');
+  const btnDec     = document.getElementById('btnDec');
+  const btnInc     = document.getElementById('btnInc');
+  const btnRst     = document.getElementById('btnRst');
+  const btnNotify  = document.getElementById('btnNotify');
+
   let count = 0;
-  let holdInterval = null;
-  let holdTimeout = null;
+  let holdInterval = null, holdTimeout = null;
 
-  const display = document.getElementById('display');
-  const sign    = document.getElementById('sign');
-  const digits  = [document.getElementById('d0'), document.getElementById('d1'), document.getElementById('d2'), document.getElementById('d3')];
-  const serial  = document.getElementById('serial');
-  const btnDec  = document.getElementById('btnDec');
-  const btnInc  = document.getElementById('btnInc');
-  const btnRst  = document.getElementById('btnRst');
-
-  function render() {
-    const abs = Math.abs(count);
+  // ── Render ───────────────────────────────────────────────────
+  function render(c) {
+    count = c;
+    const abs = Math.abs(c);
     const str = String(abs).padStart(4, '0').slice(-4);
     digits.forEach((el, i) => el.textContent = str[3 - i]);
-    sign.className = 'sign' + (count < 0 ? ' negative' : '');
-    serial.textContent = 'SN-' + String((Math.abs(count) * 13 + 4891) % 100000).padStart(5, '0');
+    signEl.className = 'sign' + (c < 0 ? ' negative' : '');
+    serialEl.textContent = 'SN-' + String((abs * 13 + 4891) % 100000).padStart(5, '0');
   }
 
   function flashDisplay(type) {
@@ -269,14 +328,67 @@
     setTimeout(() => display.className = 'display', 180);
   }
 
-  function inc() { count++; flashDisplay('up');   render(); }
-  function dec() { count--; flashDisplay('down'); render(); }
-  function rst() { count = 0; flashDisplay('rst'); render(); }
+  // ── Count mutations ──────────────────────────────────────────
+  async function applyDelta(delta) {
+    const next = count + delta;
+    await dbSet(next);
+    render(next);
+    flashDisplay(delta > 0 ? 'up' : 'down');
+    syncNotification(next);
+  }
 
+  async function applyReset() {
+    await dbSet(0);
+    render(0);
+    flashDisplay('rst');
+    syncNotification(0);
+  }
+
+  // ── Notification ─────────────────────────────────────────────
+  let notifyActive = false;
+
+  async function syncNotification(c) {
+    if (!notifyActive) return;
+    if (Notification.permission !== 'granted') return;
+    const sw = await navigator.serviceWorker.ready;
+    sw.active.postMessage({ type: 'UPDATE_NOTIF', count: c });
+  }
+
+  async function toggleNotification() {
+    if (notifyActive) {
+      // Turn off
+      notifyActive = false;
+      btnNotify.classList.remove('active');
+      const sw = await navigator.serviceWorker.ready;
+      sw.active.postMessage({ type: 'CLOSE_NOTIF' });
+      return;
+    }
+
+    if (Notification.permission === 'denied') {
+      btnNotify.classList.add('denied');
+      btnNotify.textContent = 'BLOCKED';
+      return;
+    }
+
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      btnNotify.classList.add('denied');
+      btnNotify.textContent = 'BLOCKED';
+      return;
+    }
+
+    notifyActive = true;
+    btnNotify.classList.add('active');
+    syncNotification(count);
+  }
+
+  btnNotify.addEventListener('click', toggleNotification);
+
+  // ── Hold-to-rapid ────────────────────────────────────────────
   function startHold(fn, btnEl) {
     btnEl.classList.add('held');
     holdTimeout = setTimeout(() => {
-      holdInterval = setInterval(() => { fn(); }, 80);
+      holdInterval = setInterval(fn, 80);
     }, 500);
   }
 
@@ -284,42 +396,68 @@
     btnEl && btnEl.classList.remove('held');
     clearTimeout(holdTimeout);
     clearInterval(holdInterval);
-    holdTimeout = null;
-    holdInterval = null;
+    holdTimeout = null; holdInterval = null;
   }
 
-  // Increment
-  btnInc.addEventListener('click', inc);
-  btnInc.addEventListener('mousedown', () => startHold(inc, btnInc));
-  btnInc.addEventListener('mouseup', () => endHold(btnInc));
-  btnInc.addEventListener('mouseleave', () => endHold(btnInc));
-  btnInc.addEventListener('touchstart', (e) => { e.preventDefault(); inc(); startHold(inc, btnInc); }, { passive: false });
-  btnInc.addEventListener('touchend', () => endHold(btnInc));
+  // ── Button binding ───────────────────────────────────────────
+  let usingTouch = false;
 
-  // Decrement
-  btnDec.addEventListener('click', dec);
-  btnDec.addEventListener('mousedown', () => startHold(dec, btnDec));
-  btnDec.addEventListener('mouseup', () => endHold(btnDec));
-  btnDec.addEventListener('mouseleave', () => endHold(btnDec));
-  btnDec.addEventListener('touchstart', (e) => { e.preventDefault(); dec(); startHold(dec, btnDec); }, { passive: false });
-  btnDec.addEventListener('touchend', () => endHold(btnDec));
+  function bindBtn(btn, fn) {
+    btn.addEventListener('touchstart', (e) => {
+      e.preventDefault(); usingTouch = true;
+      fn(); startHold(fn, btn);
+    }, { passive: false });
+    btn.addEventListener('touchend', (e) => {
+      e.preventDefault(); endHold(btn);
+    }, { passive: false });
+    btn.addEventListener('mousedown', () => {
+      if (usingTouch) return;
+      fn(); startHold(fn, btn);
+    });
+    btn.addEventListener('mouseup',    () => endHold(btn));
+    btn.addEventListener('mouseleave', () => endHold(btn));
+  }
 
-  // Reset
-  btnRst.addEventListener('click', rst);
+  bindBtn(btnInc, () => applyDelta(+1));
+  bindBtn(btnDec, () => applyDelta(-1));
 
-  // Keyboard support
+  btnRst.addEventListener('touchstart', (e) => { e.preventDefault(); applyReset(); }, { passive: false });
+  btnRst.addEventListener('mousedown',  ()  => { if (!usingTouch) applyReset(); });
+
+  // Keyboard
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowUp'   || e.key === '+') inc();
-    if (e.key === 'ArrowDown' || e.key === '-') dec();
-    if (e.key === 'r' || e.key === 'R' || e.key === 'Escape') rst();
+    if (e.key === 'ArrowUp'   || e.key === '+') applyDelta(+1);
+    if (e.key === 'ArrowDown' || e.key === '-') applyDelta(-1);
+    if (e.key === 'r' || e.key === 'R' || e.key === 'Escape') applyReset();
   });
 
-  render();
+  // ── SW messages (count updated from notification action) ──────
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type === 'COUNT_UPDATED') {
+      render(e.data.count);
+      flashDisplay(e.data.count > count ? 'up' : e.data.count < count ? 'down' : 'rst');
+    }
+  });
 
-  // Register service worker
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+  // ── Init ─────────────────────────────────────────────────────
+  async function init() {
+    const saved = await dbGet();
+    render(saved);
+
+    if ('serviceWorker' in navigator) {
+      await navigator.serviceWorker.register('sw.js');
+    }
+
+    // Restore notify button state if permission already granted
+    if (Notification.permission === 'granted') {
+      // Don't auto-show notification on load — user must tap NOTIFY
+    } else if (Notification.permission === 'denied') {
+      btnNotify.classList.add('denied');
+      btnNotify.textContent = 'BLOCKED';
+    }
   }
+
+  init();
 </script>
 </body>
 </html>
