@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="Counter" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <title>COUNT UNIT — MODEL 7</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100dvh;
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Courier New', Courier, monospace;
+      user-select: none;
+      -webkit-user-select: none;
+      overflow: hidden;
+      position: relative;
+      touch-action: manipulation;
+    }
+
+    .grid-bg {
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    .title {
+      letter-spacing: 0.35em;
+      font-size: 11px;
+      color: #444;
+      text-transform: uppercase;
+      margin-bottom: 40px;
+      font-weight: bold;
+    }
+
+    .chassis {
+      background: #111;
+      border: 2px solid #2a2a2a;
+      padding: 36px 44px;
+      position: relative;
+      box-shadow: 0 0 0 1px #1a1a1a, 8px 8px 0 #050505;
+      min-width: 320px;
+    }
+
+    .screw {
+      position: absolute;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      border: 1px solid #333;
+      background: #1a1a1a;
+    }
+    .screw.tl { top: 10px; left: 10px; }
+    .screw.tr { top: 10px; right: 10px; }
+    .screw.bl { bottom: 10px; left: 10px; }
+    .screw.br { bottom: 10px; right: 10px; }
+
+    .display {
+      background: #000;
+      border: 1px solid #1e1e1e;
+      padding: 20px 20px 14px;
+      margin-bottom: 28px;
+      position: relative;
+      box-shadow: inset 0 0 30px rgba(0,0,0,0.8), 0 0 0 1px #0a0a0a;
+      transition: box-shadow 0.1s;
+    }
+
+    .display.flash-up   { box-shadow: inset 0 0 30px rgba(0,0,0,.8), 0 0 20px #00ff8844, 0 0 0 1px #00ff8833; }
+    .display.flash-down { box-shadow: inset 0 0 30px rgba(0,0,0,.8), 0 0 20px #ff335544, 0 0 0 1px #ff335533; }
+    .display.flash-rst  { box-shadow: inset 0 0 30px rgba(0,0,0,.8), 0 0 20px #ffcc0044, 0 0 0 1px #ffcc0033; }
+
+    .scanlines {
+      position: absolute; inset: 0; pointer-events: none;
+      background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 3px);
+    }
+
+    .digit-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 2px;
+    }
+
+    .sign {
+      font-size: 26px;
+      color: #222;
+      line-height: 68px;
+      width: 22px;
+      text-align: center;
+      font-weight: bold;
+      transition: color 0.15s;
+    }
+    .sign.negative { color: #ff3355; }
+
+    .digit {
+      font-size: 68px;
+      line-height: 68px;
+      font-weight: bold;
+      color: #e8e8e8;
+      letter-spacing: -2px;
+      min-width: 48px;
+      text-align: center;
+      transition: color 0.12s, text-shadow 0.12s;
+    }
+    .flash-up   .digit { color: #00ff88; text-shadow: 0 0 24px #00ff88; }
+    .flash-down .digit { color: #ff3355; text-shadow: 0 0 24px #ff3355; }
+    .flash-rst  .digit { color: #ffcc00; text-shadow: 0 0 24px #ffcc00; }
+
+    .display-label {
+      font-size: 9px;
+      letter-spacing: 0.3em;
+      color: #2a2a2a;
+      text-align: right;
+      margin-top: 6px;
+      text-transform: uppercase;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    button {
+      border: 2px solid;
+      cursor: pointer;
+      font-family: 'Courier New', Courier, monospace;
+      font-weight: bold;
+      -webkit-tap-highlight-color: transparent;
+      outline: none;
+      transition: all 0.08s;
+    }
+
+    .btn-dec {
+      width: 80px; height: 80px;
+      background: #110008;
+      border-color: #2a0010;
+      color: #ff3355;
+      font-size: 34px;
+      box-shadow: inset 0 2px 0 #ffffff08;
+    }
+    .btn-dec:active, .btn-dec.held {
+      background: #1a0008;
+      border-color: #ff3355;
+      box-shadow: 0 0 16px #ff335544, inset 0 2px 0 #ff335522;
+    }
+
+    .btn-rst {
+      width: 56px; height: 80px;
+      background: #0d0d00;
+      border-color: #2a2800;
+      color: #554400;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .btn-rst:active {
+      border-color: #ffcc00;
+      color: #ffcc00;
+      background: #111100;
+    }
+
+    .btn-inc {
+      width: 80px; height: 80px;
+      background: #001108;
+      border-color: #002a14;
+      color: #00ff88;
+      font-size: 34px;
+      box-shadow: inset 0 2px 0 #ffffff08;
+    }
+    .btn-inc:active, .btn-inc.held {
+      background: #001a0d;
+      border-color: #00ff88;
+      box-shadow: 0 0 16px #00ff8844, inset 0 2px 0 #00ff8822;
+    }
+
+    .bottom-strip {
+      margin-top: 24px;
+      border-top: 1px solid #1a1a1a;
+      padding-top: 10px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: #2a2a2a;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+    }
+
+    .footer {
+      margin-top: 32px;
+      font-size: 9px;
+      color: #222;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<div class="title">◼ COUNT UNIT — MODEL 7</div>
+
+<div class="chassis">
+  <div class="screw tl"></div>
+  <div class="screw tr"></div>
+  <div class="screw bl"></div>
+  <div class="screw br"></div>
+
+  <div class="display" id="display">
+    <div class="scanlines"></div>
+    <div class="digit-row">
+      <div class="sign" id="sign">−</div>
+      <div class="digit" id="d3">0</div>
+      <div class="digit" id="d2">0</div>
+      <div class="digit" id="d1">0</div>
+      <div class="digit" id="d0">0</div>
+    </div>
+    <div class="display-label">COUNTER // ACTIVE</div>
+  </div>
+
+  <div class="controls">
+    <button class="btn-dec" id="btnDec" aria-label="Decrease">−</button>
+    <button class="btn-rst" id="btnRst" aria-label="Reset">RST</button>
+    <button class="btn-inc" id="btnInc" aria-label="Increase">+</button>
+  </div>
+
+  <div class="bottom-strip">
+    <span>HOLD TO RAPID</span>
+    <span id="serial">SN-04891</span>
+  </div>
+</div>
+
+<div class="footer">◼ INDUSTRIAL SERIES ◼</div>
+
+<script>
+  let count = 0;
+  let holdInterval = null;
+  let holdTimeout = null;
+
+  const display = document.getElementById('display');
+  const sign    = document.getElementById('sign');
+  const digits  = [document.getElementById('d0'), document.getElementById('d1'), document.getElementById('d2'), document.getElementById('d3')];
+  const serial  = document.getElementById('serial');
+  const btnDec  = document.getElementById('btnDec');
+  const btnInc  = document.getElementById('btnInc');
+  const btnRst  = document.getElementById('btnRst');
+
+  function render() {
+    const abs = Math.abs(count);
+    const str = String(abs).padStart(4, '0').slice(-4);
+    digits.forEach((el, i) => el.textContent = str[3 - i]);
+    sign.className = 'sign' + (count < 0 ? ' negative' : '');
+    serial.textContent = 'SN-' + String((Math.abs(count) * 13 + 4891) % 100000).padStart(5, '0');
+  }
+
+  function flashDisplay(type) {
+    display.className = 'display flash-' + type;
+    setTimeout(() => display.className = 'display', 180);
+  }
+
+  function inc() { count++; flashDisplay('up');   render(); }
+  function dec() { count--; flashDisplay('down'); render(); }
+  function rst() { count = 0; flashDisplay('rst'); render(); }
+
+  function startHold(fn, btnEl) {
+    btnEl.classList.add('held');
+    holdTimeout = setTimeout(() => {
+      holdInterval = setInterval(() => { fn(); }, 80);
+    }, 500);
+  }
+
+  function endHold(btnEl) {
+    btnEl && btnEl.classList.remove('held');
+    clearTimeout(holdTimeout);
+    clearInterval(holdInterval);
+    holdTimeout = null;
+    holdInterval = null;
+  }
+
+  // Increment
+  btnInc.addEventListener('click', inc);
+  btnInc.addEventListener('mousedown', () => startHold(inc, btnInc));
+  btnInc.addEventListener('mouseup', () => endHold(btnInc));
+  btnInc.addEventListener('mouseleave', () => endHold(btnInc));
+  btnInc.addEventListener('touchstart', (e) => { e.preventDefault(); inc(); startHold(inc, btnInc); }, { passive: false });
+  btnInc.addEventListener('touchend', () => endHold(btnInc));
+
+  // Decrement
+  btnDec.addEventListener('click', dec);
+  btnDec.addEventListener('mousedown', () => startHold(dec, btnDec));
+  btnDec.addEventListener('mouseup', () => endHold(btnDec));
+  btnDec.addEventListener('mouseleave', () => endHold(btnDec));
+  btnDec.addEventListener('touchstart', (e) => { e.preventDefault(); dec(); startHold(dec, btnDec); }, { passive: false });
+  btnDec.addEventListener('touchend', () => endHold(btnDec));
+
+  // Reset
+  btnRst.addEventListener('click', rst);
+
+  // Keyboard support
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp'   || e.key === '+') inc();
+    if (e.key === 'ArrowDown' || e.key === '-') dec();
+    if (e.key === 'r' || e.key === 'R' || e.key === 'Escape') rst();
+  });
+
+  render();
+
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+</script>
+</body>
+</html>
